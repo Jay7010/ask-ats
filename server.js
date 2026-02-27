@@ -101,7 +101,7 @@ app.use((err, req, res, next) => {
 app.listen(PORT, () => {
   const isProduction = process.env.NODE_ENV === 'production';
   const baseURL = isProduction 
-    ? `https://${process.env.RENDER_EXTERNAL_URL || 'your-app.onrender.com'}`
+    ? `https://${process.env.RENDER_EXTERNAL_URL || 'https://ask-ats.onrender.com'}`
     : `http://localhost:${PORT}`;
   
   console.log(`🚀 ATS Scorer API running on ${baseURL}`);

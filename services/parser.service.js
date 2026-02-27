@@ -472,15 +472,29 @@ function detectSections(rawText) {
 
   let currentSection = 'other';
 
-  for (const line of lines) {
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
     const lineLower = line.toLowerCase();
 
     // Check if this line is a section header
     let foundSection = null;
     for (const [section, keywords] of Object.entries(sectionKeywords)) {
-      if (keywords.some(kw => lineLower.includes(kw)) && line.length < 60) {
+      if (keywords.some(kw => lineLower.includes(kw)) && line.length < 100) {
         foundSection = section;
         break;
+      }
+    }
+
+    // If no match, try combining with next line (handles PDF splits like "WORK" + "EXPERIENCE")
+    if (!foundSection && i + 1 < lines.length) {
+      const combinedLine = lineLower + ' ' + lines[i + 1].toLowerCase();
+      for (const [section, keywords] of Object.entries(sectionKeywords)) {
+        if (keywords.some(kw => combinedLine.includes(kw)) && combinedLine.length < 100) {
+          foundSection = section;
+          // Skip the next line since we've combined it
+          i++;
+          break;
+        }
       }
     }
 
@@ -653,10 +667,147 @@ function calculateAchievementsScore(rawText) {
   };
 }
 
+/**
+ * Extract and parse experience entries from experience section
+ * Handles various date formats and calculates total duration
+ */
+function parseExperienceEntries(experienceSectionText) {
+  const text = experienceSectionText.join('\n');
+  
+  // Pattern to match job entries with dates
+  // Matches: "JobTitle, Company" or "JobTitle, Company — dates" or "JobTitle dates"
+  const datePattern = /\b(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec|January|February|March|April|June|July|August|September|October|November|December|\d{1,2})[\s\-–](\d{4})\b/gi;
+  
+  const entries = [];
+  let totalMonths = 0;
+  let entryCount = 0;
+
+  // Split text into potential job entries (separated by blank lines or company names)
+  const lines = text.split('\n').filter(l => l.trim().length > 0);
+  
+  let currentEntry = [];
+  for (const line of lines) {
+    // Check if this looks like a job header (has title + company + date)
+    const dateMatches = line.match(datePattern);
+    
+    if (dateMatches && currentEntry.length > 0) {
+      // Start new entry - save previous one
+      entries.push(currentEntry.join(' '));
+      currentEntry = [line];
+    } else {
+      currentEntry.push(line);
+    }
+  }
+  if (currentEntry.length > 0) {
+    entries.push(currentEntry.join(' '));
+  }
+
+  // Parse each entry for dates and calculate duration
+  for (const entry of entries) {
+    const dates = extractDatesFromEntry(entry);
+    if (dates.startDate || dates.endDate) {
+      entryCount++;
+      const months = calculateMonthsDuration(dates.startDate, dates.endDate);
+      totalMonths += months;
+      console.log(`  ✓ Job ${entryCount}: ${dates.startDate.month}/${dates.startDate.year} → ${dates.endDate.month}/${dates.endDate.year} (${months} months)`);
+    }
+  }
+
+  return {
+    entriesFound: entryCount,
+    totalMonths: totalMonths,
+    totalYears: (totalMonths / 12).toFixed(1),
+    entries: entries.slice(0, 5), // return first 5 entries
+  };
+}
+
+/**
+ * Extract start and end dates from a job entry
+ */
+function extractDatesFromEntry(entryText) {
+  const monthYearPattern = /(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec|January|February|March|April|June|July|August|September|October|November|December)\s+(\d{4})/gi;
+  const dates = [];
+  let match;
+  
+  while ((match = monthYearPattern.exec(entryText)) !== null) {
+    dates.push({
+      month: getMonthNumber(match[1]),
+      year: parseInt(match[2]),
+    });
+  }
+
+  // If fewer than 2 dates, look for year-only pattern (implicit start or end)
+  if (dates.length < 2) {
+    const yearOnly = /\b(20\d{2})\b/g;
+    const yearMatches = [...entryText.matchAll(yearOnly)].map(m => ({
+      month: dates.length > 0 ? dates[0].month : 1, // default to Jan
+      year: parseInt(m[1]),
+    }));
+    dates.push(...yearMatches);
+  }
+
+  // Handle "Present" or "Current"
+  const isPresentOrCurrent = /\b(present|current|ongoing)\b/i.test(entryText);
+  const endDate = isPresentOrCurrent ? getCurrentDate() : (dates.length > 1 ? dates[1] : dates[0]);
+  const startDate = dates.length > 0 ? dates[0] : null;
+
+  return {
+    startDate,
+    endDate,
+    isPresentOrCurrent,
+  };
+}
+
+/**
+ * Calculate months between two dates
+ */
+function calculateMonthsDuration(startDate, endDate) {
+  if (!startDate || !endDate) return 0;
+
+  const start = new Date(startDate.year, startDate.month - 1, 1);
+  const end = new Date(endDate.year, endDate.month - 1, 1);
+
+  const monthDiff = (end.getFullYear() - start.getFullYear()) * 12 + (end.getMonth() - start.getMonth());
+  return Math.max(monthDiff, 0);
+}
+
+/**
+ * Convert month name to number (1-12)
+ */
+function getMonthNumber(monthName) {
+  const months = {
+    'jan': 1, 'january': 1,
+    'feb': 2, 'february': 2,
+    'mar': 3, 'march': 3,
+    'apr': 4, 'april': 4,
+    'may': 5,
+    'jun': 6, 'june': 6,
+    'jul': 7, 'july': 7,
+    'aug': 8, 'august': 8,
+    'sep': 9, 'september': 9,
+    'oct': 10, 'october': 10,
+    'nov': 11, 'november': 11,
+    'dec': 12, 'december': 12,
+  };
+  return months[monthName.toLowerCase()] || 1;
+}
+
+/**
+ * Get current date object
+ */
+function getCurrentDate() {
+  const now = new Date();
+  return {
+    month: now.getMonth() + 1,
+    year: now.getFullYear(),
+  };
+}
+
 module.exports = {
   extractTextFromFile,
   detectSections,
   detectFormattingIssues,
   calculateContentCompleteScore,
   calculateAchievementsScore,
+  parseExperienceEntries,
 };

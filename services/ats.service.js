@@ -480,6 +480,7 @@ const {
   detectFormattingIssues,
   calculateContentCompleteScore,
   calculateAchievementsScore,
+  parseExperienceEntries,
 } = require('./parser.service');
 
 // Scoring weights (no JD mode) — v2
@@ -660,10 +661,21 @@ async function calculateFresherATSScore(resumeText, fileName, roleInfo, sections
   // Keywords — benchmark match (same as experienced)
   const keywordResult = calculateBenchmarkKeywordMatch(resumeText, roleInfo.jobFunction);
 
+  // Parse actual experience entries to get accurate duration
+  const experienceSection = sections.experience || [];
+  const experienceParsed = parseExperienceEntries(experienceSection);
+  
+  // Update roleInfo with parsed experience (more accurate than Cohere's estimate)
+  if (experienceParsed.entriesFound > 0) {
+    roleInfo.yearsOfExperience = parseFloat(experienceParsed.totalYears);
+    roleInfo.experienceEntries = experienceParsed.entriesFound;
+    roleInfo.totalExperienceMonths = experienceParsed.totalMonths;
+    console.log(`✓ Parsed ${experienceParsed.entriesFound} experience entries: ${experienceParsed.totalYears} years total`);
+  }
+
   // Projects score — check for ANY projects/internships
   let projectsScore = 40; // baseline
   const projectsSection = sections.projects || [];
-  const experienceSection = sections.experience || [];
   const allProjectText = [...projectsSection, ...experienceSection].join(' ').toLowerCase();
 
   if (projectsSection.length > 0) projectsScore += 30; // has projects section
@@ -841,6 +853,17 @@ async function calculateATSScore(resumeText, fileName) {
 
   // ── Step 3: Keyword benchmark match ──────────────────────
   const keywordResult = calculateBenchmarkKeywordMatch(resumeText, roleInfo.jobFunction);
+
+  // Parse actual experience entries to get accurate duration
+  const experienceSection = sections.experience || [];
+  const experienceParsed = parseExperienceEntries(experienceSection);
+  
+  // Update roleInfo with parsed experience (more accurate than Cohere's estimate)
+  if (experienceParsed.entriesFound > 0) {
+    roleInfo.yearsOfExperience = parseFloat(experienceParsed.totalYears);
+    roleInfo.experienceEntries = experienceParsed.entriesFound;
+    roleInfo.totalExperienceMonths = experienceParsed.totalMonths;
+  }
 
   // ── Step 4: Role alignment (LLM) ─────────────────────────
   const roleAlignment = await calculateRoleAlignment(resumeText, roleInfo);
